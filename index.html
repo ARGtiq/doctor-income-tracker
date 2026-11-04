@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Доход Врача</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0d9488">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --accent: #0d9488;
+      --accent-light: #14b8a6;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --danger: #ef4444;
+      --success: #22c55e;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding-bottom: 70px;
+    }
+    header {
+      background: linear-gradient(135deg, #0d9488, #0f766e);
+      padding: 16px 16px 20px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    header h1 { font-size: 1.4rem; font-weight: 700; }
+    .tabs {
+      display: flex;
+      background: var(--card);
+      border-bottom: 1px solid #334155;
+      position: sticky;
+      top: 64px;
+      z-index: 9;
+    }
+    .tab {
+      flex: 1;
+      padding: 12px 8px;
+      text-align: center;
+      font-size: 0.85rem;
+      cursor: pointer;
+      color: var(--muted);
+      border-bottom: 3px solid transparent;
+    }
+    .tab.active {
+      color: var(--accent-light);
+      border-bottom-color: var(--accent);
+      font-weight: 600;
+    }
+    .content { padding: 16px; }
+    .card {
+      background: var(--card);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+    input, button, select {
+      font: inherit;
+      border-radius: 8px;
+      border: none;
+    }
+    input[type="number"], input[type="text"], input[type="date"] {
+      background: #334155;
+      color: var(--text);
+      padding: 10px 12px;
+      width: 100%;
+      margin-bottom: 8px;
+    }
+    button {
+      background: var(--accent);
+      color: white;
+      padding: 10px 16px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button:active { transform: scale(0.98); }
+    button.secondary { background: #475569; }
+    button.danger { background: var(--danger); }
+    .service-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+      padding: 10px;
+      background: #334155;
+      border-radius: 10px;
+    }
+    .service-info { flex: 1; }
+    .service-name { font-weight: 600; }
+    .service-price { color: var(--muted); font-size: 0.85rem; }
+    .qty-input {
+      width: 70px !important;
+      text-align: center;
+      margin: 0 !important;
+    }
+    .total-box {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #1e293b;
+      padding: 12px 16px;
+      border-top: 1px solid #334155;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+    .total-box .amount { color: var(--success); }
+    .empty { text-align: center; color: var(--muted); padding: 40px 20px; }
+    .history-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid #334155;
+    }
+    .stat-card {
+      text-align: center;
+      padding: 16px;
+    }
+    .stat-card .value { font-size: 1.6rem; font-weight: 700; color: var(--accent-light); }
+    .stat-card .label { color: var(--muted); font-size: 0.85rem; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .small { font-size: 0.8rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>💰 Доход Врача</h1>
+    <div class="small" id="today-label"></div>
+  </header>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="today">Сегодня</div>
+    <div class="tab" data-tab="services">Услуги</div>
+    <div class="tab" data-tab="history">История</div>
+    <div class="tab" data-tab="stats">Статистика</div>
+  </div>
+
+  <div class="content" id="app"></div>
+
+  <div class="total-box" id="total-box" style="display:none;">
+    <span>Итого за день:</span>
+    <span class="amount" id="day-total">0 ₽</span>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'dohod_vracha_v1';
+
+    let state = {
+      services: [],
+      days: {},
+      currentDate: new Date().toISOString().slice(0, 10)
+    };
+
+    function load() {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        try {
+          const data = JSON.parse(raw);
+          state.services = data.services || [];
+          state.days = data.days || {};
+        } catch (e) {}
+      }
+      if (state.services.length === 0) {
+        state.services = [
+          { id: 1, name: 'Консультация', price: 2000, usage: 0 },
+          { id: 2, name: 'УЗИ', price: 2500, usage: 0 },
+          { id: 3, name: 'Манипуляция', price: 1500, usage: 0 }
+        ];
+      }
+      save();
+    }
+
+    function save() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        services: state.services,
+        days: state.days
+      }));
+    }
+
+    function nextId() {
+      return state.services.reduce((m, s) => Math.max(m, s.id), 0) + 1;
+    }
+
+    function getSortedServices() {
+      return [...state.services].sort((a, b) => b.usage - a.usage || a.name.localeCompare(b.name));
+    }
+
+    function getDayData(date) {
+      return state.days[date] || {};
+    }
+
+    function calcDayTotal(date) {
+      const day = getDayData(date);
+      return state.services.reduce((sum, s) => sum + (day[s.id] || 0) * s.price, 0);
+    }
+
+    function render() {
+      const tab = document.querySelector('.tab.active').dataset.tab;
+      const app = document.getElementById('app');
+      document.getElementById('total-box').style.display = tab === 'today' ? 'flex' : 'none';
+
+      if (tab === 'today') renderToday(app);
+      else if (tab === 'services') renderServices(app);
+      else if (tab === 'history') renderHistory(app);
+      else if (tab === 'stats') renderStats(app);
+
+      updateTodayLabel();
+    }
+
+    function updateTodayLabel() {
+      const d = new Date(state.currentDate + 'T00:00:00');
+      document.getElementById('today-label').textContent = d.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+    }
+
+    function renderToday(app) {
+      const services = getSortedServices();
+      const day = getDayData(state.currentDate);
+      let html = `
+        <div class="card">
+          <label class="small">Дата</label>
+          <input type="date" id="date-picker" value="${state.currentDate}">
+        </div>
+      `;
+
+      if (services.length === 0) {
+        html += '<div class="empty">Сначала добавьте услуги во вкладке «Услуги»</div>';
+      } else {
+        html += '<div id="services-list">';
+        services.forEach(s => {
+          const qty = day[s.id] || 0;
+          html += `
+            <div class="service-row">
+              <div class="service-info">
+                <div class="service-name">${s.name}</div>
+                <div class="service-price">${s.price.toLocaleString('ru')} ₽ · использовано ${s.usage || 0} раз</div>
+              </div>
+              <input type="number" class="qty-input" data-id="${s.id}" value="${qty}" min="0" inputmode="numeric">
+            </div>
+          `;
+        });
+        html += '</div>';
+        html += `<button id="save-day" style="width:100%; margin-top:8px;">Сохранить день</button>`;
+      }
+      app.innerHTML = html;
+
+      const datePicker = document.getElementById('date-picker');
+      if (datePicker) {
+        datePicker.onchange = (e) => {
+          state.currentDate = e.target.value;
+          render();
+        };
+      }
+
+      document.querySelectorAll('.qty-input').forEach(input => {
+        input.oninput = updateDayTotalDisplay;
+      });
+
+      const saveBtn = document.getElementById('save-day');
+      if (saveBtn) saveBtn.onclick = saveDay;
+
+      updateDayTotalDisplay();
+    }
+
+    function updateDayTotalDisplay() {
+      const total = calcCurrentDayTotal();
+      document.getElementById('day-total').textContent = total.toLocaleString('ru') + ' ₽';
+    }
+
+    function calcCurrentDayTotal() {
+      let total = 0;
+      document.querySelectorAll('.qty-input').forEach(input => {
+        const id = +input.dataset.id;
+        const qty = +input.value || 0;
+        const service = state.services.find(s => s.id === id);
+        if (service) total += qty * service.price;
+      });
+      return total;
+    }
+
+    function saveDay() {
+      const quantities = {};
+      document.querySelectorAll('.qty-input').forEach(input => {
+        const id = +input.dataset.id;
+        const qty = +input.value || 0;
+        if (qty > 0) quantities[id] = qty;
+      });
+
+      const prev = state.days[state.currentDate] || {};
+      Object.entries(quantities).forEach(([id, qty]) => {
+        if (qty > 0 && !(prev[id] > 0)) {
+          const service = state.services.find(s => s.id == id);
+          if (service) service.usage = (service.usage || 0) + 1;
+        }
+      });
+      Object.keys(prev).forEach(id => {
+        if (prev[id] > 0 && !(quantities[id] > 0)) {
+          const service = state.services.find(s => s.id == id);
+          if (service && service.usage > 0) service.usage--;
+        }
+      });
+
+      state.days[state.currentDate] = quantities;
+      save();
+      alert('День сохранён! Пук в вечность учёта 💨');
+      render();
+    }
+
+    function renderServices(app) {
+      let html = `
+        <div class="card">
+          <h3 style="margin-bottom:10px;">Добавить услугу</h3>
+          <input type="text" id="new-name" placeholder="Название (например, Консультация)">
+          <input type="number" id="new-price" placeholder="Цена ₽" min="0">
+          <button id="add-service" style="width:100%;">Добавить</button>
+        </div>
+        <div id="services-manage">
+      `;
+
+      getSortedServices().forEach(s => {
+        html += `
+          <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <div style="font-weight:600;">${s.name}</div>
+              <div class="small">${s.price.toLocaleString('ru')} ₽ · ${s.usage || 0} раз</div>
+            </div>
+            <button class="danger small-btn" data-id="${s.id}">Удалить</button>
+          </div>
+        `;
+      });
+      html += '</div>';
+      app.innerHTML = html;
+
+      document.getElementById('add-service').onclick = () => {
+        const name = document.getElementById('new-name').value.trim();
+        const price = +document.getElementById('new-price').value;
+        if (!name || price <= 0) {
+          alert('Название и цена обязательны, не метай бисер перед свиньями');
+          return;
+        }
+        state.services.push({ id: nextId(), name, price, usage: 0 });
+        save();
+        render();
+      };
+
+      document.querySelectorAll('.danger').forEach(btn => {
+        btn.onclick = () => {
+          if (confirm('Удалить услугу? История по ней останется, но в списке пропадёт.')) {
+            const id = +btn.dataset.id;
+            state.services = state.services.filter(s => s.id !== id);
+            save();
+            render();
+          }
+        };
+      });
+    }
+
+    function renderHistory(app) {
+      const dates = Object.keys(state.days).sort().reverse();
+      if (dates.length === 0) {
+        app.innerHTML = '<div class="empty">Пока пусто, как космос без пуков</div>';
+        return;
+      }
+      let html = '';
+      dates.forEach(date => {
+        const total = calcDayTotal(date);
+        const d = new Date(date + 'T00:00:00');
+        const label = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' });
+        html += `
+          <div class="history-item">
+            <div>
+              <div>${label}</div>
+              <div class="small">${Object.keys(state.days[date]).length} услуг</div>
+            </div>
+            <div style="font-weight:700; color:var(--success);">${total.toLocaleString('ru')} ₽</div>
+          </div>
+        `;
+      });
+      app.innerHTML = html;
+    }
+
+    function renderStats(app) {
+      const dates = Object.keys(state.days);
+      if (dates.length === 0) {
+        app.innerHTML = '<div class="empty">Нет данных для статистики — ловить рыбу в унитазе рано</div>';
+        return;
+      }
+
+      let totalAll = 0;
+      let maxDay = 0;
+      const byMonth = {};
+
+      dates.forEach(date => {
+        const t = calcDayTotal(date);
+        totalAll += t;
+        if (t > maxDay) maxDay = t;
+        const month = date.slice(0, 7);
+        byMonth[month] = (byMonth[month] || 0) + t;
+      });
+
+      const avg = Math.round(totalAll / dates.length);
+      const months = Object.keys(byMonth).sort().reverse().slice(0, 6);
+
+      let html = `
+        <div class="grid-2">
+          <div class="card stat-card">
+            <div class="value">${totalAll.toLocaleString('ru')} ₽</div>
+            <div class="label">Всего за всё время</div>
+          </div>
+          <div class="card stat-card">
+            <div class="value">${avg.toLocaleString('ru')} ₽</div>
+            <div class="label">Средний день</div>
+          </div>
+          <div class="card stat-card">
+            <div class="value">${maxDay.toLocaleString('ru')} ₽</div>
+            <div class="label">Лучший день</div>
+          </div>
+          <div class="card stat-card">
+            <div class="value">${dates.length}</div>
+            <div class="label">Дней в учёте</div>
+          </div>
+        </div>
+        <h3 style="margin:16px 0 8px;">По месяцам</h3>
+      `;
+
+      months.forEach(m => {
+        const label = new Date(m + '-01').toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+        html += `
+          <div class="history-item">
+            <div>${label}</div>
+            <div style="font-weight:700;">${byMonth[m].toLocaleString('ru')} ₽</div>
+          </div>
+        `;
+      });
+
+      app.innerHTML = html;
+    }
+
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.onclick = () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        render();
+      };
+    });
+
+    load();
+    render();
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>
