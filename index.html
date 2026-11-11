@@ -181,6 +181,7 @@
     }
     .cal-day.selected { background: var(--accent); color: white; }
     .cal-day.has-data { border: 2px solid var(--success); }
+    .cal-day.working { background: #065f46; }
     .cal-grid {
       display: grid;
       grid-template-columns: repeat(7, 1fr);
@@ -223,13 +224,14 @@
       days: {},
       currentDate: new Date().toISOString().slice(0, 10),
       incomePercent: 100,
-      workingDays: 20,
-      targetMonthly: 0
+      targetMonthly: 0,
+      workingDaysMarked: {}
     };
 
     let calExpanded = false;
     let calViewMonth = new Date().getMonth();
     let calViewYear = new Date().getFullYear();
+    let markMode = false;
 
     function load() {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -239,8 +241,8 @@
           state.services = data.services || [];
           state.days = data.days || {};
           state.incomePercent = data.incomePercent != null ? data.incomePercent : 100;
-          state.workingDays = data.workingDays || 20;
           state.targetMonthly = data.targetMonthly || 0;
+          state.workingDaysMarked = data.workingDaysMarked || {};
         } catch (e) {}
       }
       if (state.services.length === 0) {
@@ -258,8 +260,8 @@
         services: state.services,
         days: state.days,
         incomePercent: state.incomePercent,
-        workingDays: state.workingDays,
-        targetMonthly: state.targetMonthly
+        targetMonthly: state.targetMonthly,
+        workingDaysMarked: state.workingDaysMarked
       }));
     }
 
@@ -284,25 +286,35 @@
       return Math.round(amount * state.incomePercent / 100);
     }
 
-    function getCurrentMonthNet() {
+    function getCurrentMonthGross() {
       const now = new Date();
       const ym = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
       let total = 0;
       Object.keys(state.days).forEach(date => {
         if (date.startsWith(ym)) total += calcDayTotal(date);
       });
-      return calcNet(total);
+      return total;
+    }
+
+    function getMarkedWorkingDaysCount() {
+      const ym = `${calViewYear}-${String(calViewMonth+1).padStart(2,'0')}`;
+      return Object.keys(state.workingDaysMarked).filter(d => d.startsWith(ym) && state.workingDaysMarked[d]).length;
+    }
+
+    function getDailyTarget() {
+      const count = getMarkedWorkingDaysCount();
+      return count > 0 ? Math.round(state.targetMonthly / count) : 0;
     }
 
     function updateHeader() {
       const d = new Date(state.currentDate + 'T00:00:00');
       document.getElementById('today-label').textContent = d.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
 
-      const currentNet = getCurrentMonthNet();
-      const remain = Math.max(0, state.targetMonthly - currentNet);
+      const currentGross = getCurrentMonthGross();
+      const remain = Math.max(0, state.targetMonthly - currentGross);
       const remainEl = document.getElementById('remain-label');
       if (state.targetMonthly > 0) {
-        remainEl.textContent = `Осталось: ${remain.toLocaleString('ru')} ₽`;
+        remainEl.textContent = `Осталось до цели: ${remain.toLocaleString('ru')} ₽`;
         remainEl.style.color = remain > 0 ? '#fbbf24' : '#22c55e';
       } else {
         remainEl.textContent = '';
@@ -333,6 +345,23 @@
           <button type="button" class="cal-nav secondary" id="cal-toggle" style="margin-left:8px;">${calExpanded ? 'Свернуть' : 'Развернуть'}</button>
         </div>`;
 
+      if (calExpanded) {
+        const marked = getMarkedWorkingDaysCount();
+        const daily = getDailyTarget();
+        html += `
+          <div style="margin:10px 0;">
+            <label class="small">Необходимая общая сумма за месяц</label>
+            <input type="number" id="target-input" value="${state.targetMonthly}" min="0" step="1000">
+            <div class="small">Отмечено рабочих дней: <strong>${marked}</strong>
+              ${daily > 0 ? ` · цель в день: <strong>${daily.toLocaleString('ru')} ₽</strong>` : ''}
+            </div>
+            <button type="button" id="mark-mode-btn" class="${markMode ? '' : 'secondary'}" style="margin-top:8px; width:100%;">
+              ${markMode ? 'Режим отметки рабочих дней включён' : 'Отметить рабочие дни'}
+            </button>
+          </div>
+        `;
+      }
+
       if (!calExpanded) {
         const sel = new Date(selected + 'T00:00:00');
         const start = new Date(sel);
@@ -343,7 +372,8 @@
           d.setDate(start.getDate() + i);
           const ds = d.toISOString().slice(0,10);
           const has = state.days[ds] && Object.keys(state.days[ds]).length > 0;
-          const cls = ['cal-day', ds === selected ? 'selected' : '', has ? 'has-data' : ''].filter(Boolean).join(' ');
+          const working = state.workingDaysMarked[ds];
+          const cls = ['cal-day', ds === selected ? 'selected' : '', has ? 'has-data' : '', working ? 'working' : ''].filter(Boolean).join(' ');
           html += `<div class="${cls}" data-date="${ds}">${d.getDate()}<br><small>${['Вс','Пн','Вт','Ср','Чт','Пт','Сб'][d.getDay()]}</small></div>`;
         }
         html += '</div>';
@@ -357,7 +387,8 @@
         for (let day = 1; day <= last.getDate(); day++) {
           const ds = `${calViewYear}-${String(calViewMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
           const has = state.days[ds] && Object.keys(state.days[ds]).length > 0;
-          const cls = ['cal-day', ds === selected ? 'selected' : '', has ? 'has-data' : ''].filter(Boolean).join(' ');
+          const working = state.workingDaysMarked[ds];
+          const cls = ['cal-day', ds === selected ? 'selected' : '', has ? 'has-data' : '', working ? 'working' : ''].filter(Boolean).join(' ');
           html += `<div class="${cls}" data-date="${ds}">${day}</div>`;
         }
         html += '</div>';
@@ -369,11 +400,19 @@
     function bindCalendar() {
       document.querySelectorAll('.cal-day[data-date]').forEach(el => {
         el.onclick = () => {
-          state.currentDate = el.dataset.date;
-          const d = new Date(state.currentDate);
-          calViewMonth = d.getMonth();
-          calViewYear = d.getFullYear();
-          render();
+          const ds = el.dataset.date;
+          if (markMode && calExpanded) {
+            state.workingDaysMarked[ds] = !state.workingDaysMarked[ds];
+            if (!state.workingDaysMarked[ds]) delete state.workingDaysMarked[ds];
+            save();
+            render();
+          } else {
+            state.currentDate = ds;
+            const d = new Date(ds);
+            calViewMonth = d.getMonth();
+            calViewYear = d.getFullYear();
+            render();
+          }
         };
       });
       const prev = document.getElementById('cal-prev');
@@ -381,7 +420,19 @@
       const toggle = document.getElementById('cal-toggle');
       if (prev) prev.onclick = () => { calViewMonth--; if (calViewMonth < 0) { calViewMonth = 11; calViewYear--; } render(); };
       if (next) next.onclick = () => { calViewMonth++; if (calViewMonth > 11) { calViewMonth = 0; calViewYear++; } render(); };
-      if (toggle) toggle.onclick = () => { calExpanded = !calExpanded; render(); };
+      if (toggle) toggle.onclick = () => { calExpanded = !calExpanded; markMode = false; render(); };
+
+      const targetInput = document.getElementById('target-input');
+      if (targetInput) {
+        targetInput.oninput = () => {
+          state.targetMonthly = +targetInput.value || 0;
+          save();
+          updateHeader();
+          updateDayTotalDisplay();
+        };
+      }
+      const markBtn = document.getElementById('mark-mode-btn');
+      if (markBtn) markBtn.onclick = () => { markMode = !markMode; render(); };
     }
 
     function autoSaveDay() {
@@ -470,8 +521,13 @@
     function updateDayTotalDisplay() {
       const total = calcCurrentDayTotal();
       const net = calcNet(total);
+      const dailyTarget = getDailyTarget();
       document.getElementById('day-total').textContent = total.toLocaleString('ru') + ' ₽';
-      document.getElementById('day-net').textContent = `Твой доход (${state.incomePercent}%): ${net.toLocaleString('ru')} ₽`;
+      let status = '';
+      if (dailyTarget > 0) {
+        status = total >= dailyTarget ? ' · достигнута цель дня' : ` · до цели дня: ${(dailyTarget - total).toLocaleString('ru')} ₽`;
+      }
+      document.getElementById('day-net').textContent = `Твой доход (${state.incomePercent}%): ${net.toLocaleString('ru')} ₽${status}`;
     }
 
     function calcCurrentDayTotal() {
@@ -488,14 +544,12 @@
     function renderStats(app) {
       const dates = Object.keys(state.days);
       let totalAll = 0;
-      let maxDay = 0;
       const byMonth = {};
       const currentMonth = new Date().toISOString().slice(0, 7);
 
       dates.forEach(date => {
         const t = calcDayTotal(date);
         totalAll += t;
-        if (t > maxDay) maxDay = t;
         const month = date.slice(0, 7);
         byMonth[month] = (byMonth[month] || 0) + t;
       });
@@ -503,13 +557,17 @@
       const avg = dates.length ? Math.round(totalAll / dates.length) : 0;
       const netAll = calcNet(totalAll);
       const netAvg = calcNet(avg);
-      const currentMonthTotal = byMonth[currentMonth] || 0;
-      const currentMonthNet = calcNet(currentMonthTotal);
+      const currentMonthGross = byMonth[currentMonth] || 0;
+      const currentMonthNet = calcNet(currentMonthGross);
 
       const months = Object.keys(byMonth).sort().reverse().slice(0, 6);
 
       let html = `
         <div class="grid-2">
+          <div class="card stat-card">
+            <div class="value">${currentMonthGross.toLocaleString('ru')} ₽</div>
+            <div class="label">Общая сумма за этот месяц</div>
+          </div>
           <div class="card stat-card">
             <div class="value">${currentMonthNet.toLocaleString('ru')} ₽</div>
             <div class="label">Твой доход за этот месяц</div>
@@ -517,10 +575,6 @@
           <div class="card stat-card">
             <div class="value">${netAvg.toLocaleString('ru')} ₽</div>
             <div class="label">Среднее в день (твоё)</div>
-          </div>
-          <div class="card stat-card">
-            <div class="value">${netAll.toLocaleString('ru')} ₽</div>
-            <div class="label">Всего твой доход</div>
           </div>
           <div class="card stat-card">
             <div class="value">${dates.length}</div>
@@ -540,15 +594,19 @@
         `;
       });
 
-      html += `<h3 style="margin:16px 0 8px;">По месяцам (твой доход)</h3>`;
+      html += `<h3 style="margin:16px 0 8px;">По месяцам</h3>`;
 
       months.forEach(m => {
         const label = new Date(m + '-01').toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
-        const net = calcNet(byMonth[m]);
+        const gross = byMonth[m];
+        const net = calcNet(gross);
         html += `
           <div class="history-item">
             <div>${label}</div>
-            <div style="font-weight:700;">${net.toLocaleString('ru')} ₽</div>
+            <div style="text-align:right;">
+              <div style="font-weight:700;">${gross.toLocaleString('ru')} ₽</div>
+              <div class="small">твой: ${net.toLocaleString('ru')} ₽</div>
+            </div>
           </div>
         `;
       });
@@ -583,30 +641,10 @@
     }
 
     function renderSettings(app) {
-      const targetDaily = state.workingDays > 0 && state.targetMonthly > 0
-        ? Math.round(state.targetMonthly / state.workingDays)
-        : 0;
-      const targetDailyGross = state.incomePercent > 0 && targetDaily > 0
-        ? Math.round(targetDaily * 100 / state.incomePercent)
-        : 0;
-
       let html = `
         <div class="card">
           <label class="small">Процент твоего дохода от общей суммы</label>
           <input type="number" id="percent-input" value="${state.incomePercent}" min="1" max="100" step="1">
-        </div>
-        <div class="card">
-          <label class="small">Количество рабочих дней в месяце</label>
-          <input type="number" id="days-input" value="${state.workingDays}" min="1" max="31">
-        </div>
-        <div class="card">
-          <label class="small">Необходимый доход в месяц (твой, с учётом %)</label>
-          <input type="number" id="target-input" value="${state.targetMonthly}" min="0" step="1000">
-        </div>
-        <div class="card stat-card" id="target-card">
-          <div class="value">${targetDaily.toLocaleString('ru')} ₽</div>
-          <div class="label">Целевой доход в день (твой) на следующий месяц</div>
-          ${targetDailyGross > 0 ? `<div class="small" style="margin-top:6px;">Нужно зарабатывать ~${targetDailyGross.toLocaleString('ru')} ₽ общей суммы в день</div>` : ''}
         </div>
 
         <div class="card">
@@ -620,12 +658,10 @@
 
       getSortedServices().forEach(s => {
         html += `
-          <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
-            <div>
-              <div style="font-weight:600;">${s.name}</div>
-              <div class="small">${s.price.toLocaleString('ru')} ₽</div>
-            </div>
-            <button class="danger small-btn" data-id="${s.id}">Удалить</button>
+          <div class="card" style="display:flex; gap:8px; align-items:center;">
+            <input type="text" class="edit-name" data-id="${s.id}" value="${s.name}" style="flex:1; margin:0;">
+            <input type="number" class="edit-price" data-id="${s.id}" value="${s.price}" style="width:100px; margin:0;">
+            <button class="danger small-btn" data-id="${s.id}">×</button>
           </div>
         `;
       });
@@ -643,35 +679,24 @@
 
       app.innerHTML = html;
 
-      // Auto-save settings
-      ['percent-input','days-input','target-input'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) {
-          el.oninput = () => {
-            const p = +document.getElementById('percent-input').value;
-            const d = +document.getElementById('days-input').value;
-            const t = +document.getElementById('target-input').value;
-            if (p >= 1 && p <= 100) state.incomePercent = p;
-            if (d >= 1 && d <= 31) state.workingDays = d;
-            if (t >= 0) state.targetMonthly = t;
-            save();
-            updateHeader();
-            const targetDaily = state.workingDays > 0 && state.targetMonthly > 0
-              ? Math.round(state.targetMonthly / state.workingDays)
-              : 0;
-            const targetDailyGross = state.incomePercent > 0 && targetDaily > 0
-              ? Math.round(targetDaily * 100 / state.incomePercent)
-              : 0;
-            const card = document.getElementById('target-card');
-            if (card) {
-              card.innerHTML = `
-                <div class="value">${targetDaily.toLocaleString('ru')} ₽</div>
-                <div class="label">Целевой доход в день (твой) на следующий месяц</div>
-                ${targetDailyGross > 0 ? `<div class="small" style="margin-top:6px;">Нужно зарабатывать ~${targetDailyGross.toLocaleString('ru')} ₽ общей суммы в день</div>` : ''}
-              `;
-            }
-          };
+      document.getElementById('percent-input').oninput = (e) => {
+        const v = +e.target.value;
+        if (v >= 1 && v <= 100) {
+          state.incomePercent = v;
+          save();
         }
+      };
+
+      document.querySelectorAll('.edit-name, .edit-price').forEach(input => {
+        input.oninput = () => {
+          const id = +input.dataset.id;
+          const service = state.services.find(s => s.id === id);
+          if (service) {
+            if (input.classList.contains('edit-name')) service.name = input.value.trim() || service.name;
+            if (input.classList.contains('edit-price')) service.price = +input.value || 0;
+            save();
+          }
+        };
       });
 
       document.getElementById('add-service').onclick = () => {
@@ -688,7 +713,7 @@
 
       document.querySelectorAll('.danger').forEach(btn => {
         btn.onclick = () => {
-          if (confirm('Удалить услугу? История по ней останется, но в списке пропадёт.')) {
+          if (confirm('Удалить услугу?')) {
             const id = +btn.dataset.id;
             state.services = state.services.filter(s => s.id !== id);
             save();
@@ -702,8 +727,8 @@
           services: state.services,
           days: state.days,
           incomePercent: state.incomePercent,
-          workingDays: state.workingDays,
           targetMonthly: state.targetMonthly,
+          workingDaysMarked: state.workingDaysMarked,
           exportedAt: new Date().toISOString()
         };
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -730,8 +755,8 @@
                 state.services = data.services;
                 state.days = data.days || {};
                 state.incomePercent = data.incomePercent != null ? data.incomePercent : 100;
-                state.workingDays = data.workingDays || 20;
                 state.targetMonthly = data.targetMonthly || 0;
+                state.workingDaysMarked = data.workingDaysMarked || {};
                 save();
                 alert('Данные импортированы');
                 render();
