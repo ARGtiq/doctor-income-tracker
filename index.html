@@ -202,8 +202,6 @@
 
   <div class="tabs">
     <div class="tab active" data-tab="today">Сегодня</div>
-    <div class="tab" data-tab="services">Услуги</div>
-    <div class="tab" data-tab="history">История</div>
     <div class="tab" data-tab="stats">Статистика</div>
     <div class="tab" data-tab="settings">Настройки</div>
   </div>
@@ -317,8 +315,6 @@
       document.getElementById('total-box').style.display = tab === 'today' ? 'flex' : 'none';
 
       if (tab === 'today') renderToday(app);
-      else if (tab === 'services') renderServices(app);
-      else if (tab === 'history') renderHistory(app);
       else if (tab === 'stats') renderStats(app);
       else if (tab === 'settings') renderSettings(app);
 
@@ -421,7 +417,7 @@
       let html = renderCalendar();
 
       if (services.length === 0) {
-        html += '<div class="empty">Сначала добавьте услуги во вкладке «Услуги»</div>';
+        html += '<div class="empty">Сначала добавьте услуги в Настройках</div>';
       } else {
         html += '<div id="services-list">';
         services.forEach(s => {
@@ -430,7 +426,7 @@
             <div class="service-row">
               <div class="service-info">
                 <div class="service-name">${s.name}</div>
-                <div class="service-price">${s.price.toLocaleString('ru')} ₽ · использовано ${s.usage || 0} раз</div>
+                <div class="service-price">${s.price.toLocaleString('ru')} ₽</div>
               </div>
               <div class="qty-controls">
                 <button type="button" class="qty-btn" data-id="${s.id}" data-delta="-1">−</button>
@@ -489,90 +485,8 @@
       return total;
     }
 
-    function renderServices(app) {
-      let html = `
-        <div class="card">
-          <h3 style="margin-bottom:10px;">Добавить услугу</h3>
-          <input type="text" id="new-name" placeholder="Название (например, Консультация)">
-          <input type="number" id="new-price" placeholder="Цена ₽" min="0">
-          <button id="add-service" style="width:100%;">Добавить</button>
-        </div>
-        <div id="services-manage">
-      `;
-
-      getSortedServices().forEach(s => {
-        html += `
-          <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
-            <div>
-              <div style="font-weight:600;">${s.name}</div>
-              <div class="small">${s.price.toLocaleString('ru')} ₽ · ${s.usage || 0} раз</div>
-            </div>
-            <button class="danger small-btn" data-id="${s.id}">Удалить</button>
-          </div>
-        `;
-      });
-      html += '</div>';
-      app.innerHTML = html;
-
-      document.getElementById('add-service').onclick = () => {
-        const name = document.getElementById('new-name').value.trim();
-        const price = +document.getElementById('new-price').value;
-        if (!name || price <= 0) {
-          alert('Название и цена обязательны');
-          return;
-        }
-        state.services.push({ id: nextId(), name, price, usage: 0 });
-        save();
-        render();
-      };
-
-      document.querySelectorAll('.danger').forEach(btn => {
-        btn.onclick = () => {
-          if (confirm('Удалить услугу? История по ней останется, но в списке пропадёт.')) {
-            const id = +btn.dataset.id;
-            state.services = state.services.filter(s => s.id !== id);
-            save();
-            render();
-          }
-        };
-      });
-    }
-
-    function renderHistory(app) {
-      const dates = Object.keys(state.days).sort().reverse();
-      if (dates.length === 0) {
-        app.innerHTML = '<div class="empty">Пока пусто</div>';
-        return;
-      }
-      let html = '';
-      dates.forEach(date => {
-        const total = calcDayTotal(date);
-        const net = calcNet(total);
-        const d = new Date(date + 'T00:00:00');
-        const label = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' });
-        html += `
-          <div class="history-item">
-            <div>
-              <div>${label}</div>
-              <div class="small">${Object.keys(state.days[date]).length} услуг</div>
-            </div>
-            <div style="text-align:right;">
-              <div style="font-weight:700; color:var(--success);">${total.toLocaleString('ru')} ₽</div>
-              <div class="small">твой: ${net.toLocaleString('ru')} ₽</div>
-            </div>
-          </div>
-        `;
-      });
-      app.innerHTML = html;
-    }
-
     function renderStats(app) {
       const dates = Object.keys(state.days);
-      if (dates.length === 0) {
-        app.innerHTML = '<div class="empty">Нет данных для статистики</div>';
-        return;
-      }
-
       let totalAll = 0;
       let maxDay = 0;
       const byMonth = {};
@@ -586,7 +500,7 @@
         byMonth[month] = (byMonth[month] || 0) + t;
       });
 
-      const avg = Math.round(totalAll / dates.length);
+      const avg = dates.length ? Math.round(totalAll / dates.length) : 0;
       const netAll = calcNet(totalAll);
       const netAvg = calcNet(avg);
       const currentMonthTotal = byMonth[currentMonth] || 0;
@@ -614,8 +528,19 @@
           </div>
         </div>
 
-        <h3 style="margin:16px 0 8px;">По месяцам (твой доход)</h3>
+        <h3 style="margin:16px 0 8px;">Популярность услуг</h3>
       `;
+
+      getSortedServices().forEach(s => {
+        html += `
+          <div class="history-item">
+            <div>${s.name}</div>
+            <div style="font-weight:700;">${s.usage || 0} раз</div>
+          </div>
+        `;
+      });
+
+      html += `<h3 style="margin:16px 0 8px;">По месяцам (твой доход)</h3>`;
 
       months.forEach(m => {
         const label = new Date(m + '-01').toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
@@ -628,6 +553,32 @@
         `;
       });
 
+      html += `<h3 style="margin:16px 0 8px;">История дней</h3>`;
+
+      const sortedDates = Object.keys(state.days).sort().reverse();
+      if (sortedDates.length === 0) {
+        html += '<div class="empty">Пока пусто</div>';
+      } else {
+        sortedDates.forEach(date => {
+          const total = calcDayTotal(date);
+          const net = calcNet(total);
+          const d = new Date(date + 'T00:00:00');
+          const label = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' });
+          html += `
+            <div class="history-item">
+              <div>
+                <div>${label}</div>
+                <div class="small">${Object.keys(state.days[date]).length} услуг</div>
+              </div>
+              <div style="text-align:right;">
+                <div style="font-weight:700; color:var(--success);">${total.toLocaleString('ru')} ₽</div>
+                <div class="small">твой: ${net.toLocaleString('ru')} ₽</div>
+              </div>
+            </div>
+          `;
+        });
+      }
+
       app.innerHTML = html;
     }
 
@@ -639,7 +590,7 @@
         ? Math.round(targetDaily * 100 / state.incomePercent)
         : 0;
 
-      app.innerHTML = `
+      let html = `
         <div class="card">
           <label class="small">Процент твоего дохода от общей суммы</label>
           <input type="number" id="percent-input" value="${state.incomePercent}" min="1" max="100" step="1">
@@ -652,11 +603,34 @@
           <label class="small">Необходимый доход в месяц (твой, с учётом %)</label>
           <input type="number" id="target-input" value="${state.targetMonthly}" min="0" step="1000">
         </div>
-        <div class="card stat-card">
+        <div class="card stat-card" id="target-card">
           <div class="value">${targetDaily.toLocaleString('ru')} ₽</div>
           <div class="label">Целевой доход в день (твой) на следующий месяц</div>
           ${targetDailyGross > 0 ? `<div class="small" style="margin-top:6px;">Нужно зарабатывать ~${targetDailyGross.toLocaleString('ru')} ₽ общей суммы в день</div>` : ''}
         </div>
+
+        <div class="card">
+          <h3 style="margin-bottom:10px;">Услуги</h3>
+          <input type="text" id="new-name" placeholder="Название">
+          <input type="number" id="new-price" placeholder="Цена ₽" min="0">
+          <button id="add-service" style="width:100%;">Добавить услугу</button>
+        </div>
+        <div id="services-manage">
+      `;
+
+      getSortedServices().forEach(s => {
+        html += `
+          <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <div style="font-weight:600;">${s.name}</div>
+              <div class="small">${s.price.toLocaleString('ru')} ₽</div>
+            </div>
+            <button class="danger small-btn" data-id="${s.id}">Удалить</button>
+          </div>
+        `;
+      });
+
+      html += `</div>
 
         <div class="card">
           <h3 style="margin-bottom:10px;">Резервная копия</h3>
@@ -667,7 +641,9 @@
         </div>
       `;
 
-      // Auto-save settings on input change
+      app.innerHTML = html;
+
+      // Auto-save settings
       ['percent-input','days-input','target-input'].forEach(id => {
         const el = document.getElementById(id);
         if (el) {
@@ -680,14 +656,13 @@
             if (t >= 0) state.targetMonthly = t;
             save();
             updateHeader();
-            // Re-render target daily display without full reload
             const targetDaily = state.workingDays > 0 && state.targetMonthly > 0
               ? Math.round(state.targetMonthly / state.workingDays)
               : 0;
             const targetDailyGross = state.incomePercent > 0 && targetDaily > 0
               ? Math.round(targetDaily * 100 / state.incomePercent)
               : 0;
-            const card = document.querySelector('.stat-card');
+            const card = document.getElementById('target-card');
             if (card) {
               card.innerHTML = `
                 <div class="value">${targetDaily.toLocaleString('ru')} ₽</div>
@@ -697,6 +672,29 @@
             }
           };
         }
+      });
+
+      document.getElementById('add-service').onclick = () => {
+        const name = document.getElementById('new-name').value.trim();
+        const price = +document.getElementById('new-price').value;
+        if (!name || price <= 0) {
+          alert('Название и цена обязательны');
+          return;
+        }
+        state.services.push({ id: nextId(), name, price, usage: 0 });
+        save();
+        render();
+      };
+
+      document.querySelectorAll('.danger').forEach(btn => {
+        btn.onclick = () => {
+          if (confirm('Удалить услугу? История по ней останется, но в списке пропадёт.')) {
+            const id = +btn.dataset.id;
+            state.services = state.services.filter(s => s.id !== id);
+            save();
+            render();
+          }
+        };
       });
 
       document.getElementById('export-btn').onclick = () => {
