@@ -36,22 +36,27 @@
       z-index: 10;
     }
     header h1 { font-size: 1.4rem; font-weight: 700; }
+    .header-info { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 4px; }
+    .header-remain { font-size: 0.85rem; opacity: 0.9; text-align: right; }
     .tabs {
       display: flex;
       background: var(--card);
       border-bottom: 1px solid #334155;
       position: sticky;
-      top: 64px;
+      top: 72px;
       z-index: 9;
+      overflow-x: auto;
     }
     .tab {
       flex: 1;
+      min-width: 70px;
       padding: 12px 8px;
       text-align: center;
-      font-size: 0.85rem;
+      font-size: 0.8rem;
       cursor: pointer;
       color: var(--muted);
       border-bottom: 3px solid transparent;
+      white-space: nowrap;
     }
     .tab.active {
       color: var(--accent-light);
@@ -150,12 +155,50 @@
     .stat-card .label { color: var(--muted); font-size: 0.85rem; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .small { font-size: 0.8rem; color: var(--muted); }
+    /* Calendar */
+    .cal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .cal-nav { background: #475569; padding: 6px 12px; font-size: 1.1rem; }
+    .cal-month { font-weight: 600; }
+    .cal-week {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding: 4px 0 8px;
+      scrollbar-width: thin;
+    }
+    .cal-day {
+      flex: 0 0 48px;
+      text-align: center;
+      padding: 8px 4px;
+      border-radius: 10px;
+      background: #334155;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    .cal-day.selected { background: var(--accent); color: white; }
+    .cal-day.has-data { border: 2px solid var(--success); }
+    .cal-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+      margin-top: 8px;
+    }
+    .cal-weekday { text-align: center; font-size: 0.75rem; color: var(--muted); padding: 4px 0; }
+    .cal-grid .cal-day { flex: none; }
   </style>
 </head>
 <body>
   <header>
     <h1>💰 Доход Врача</h1>
-    <div class="small" id="today-label"></div>
+    <div class="header-info">
+      <div class="small" id="today-label"></div>
+      <div class="header-remain" id="remain-label"></div>
+    </div>
   </header>
 
   <div class="tabs">
@@ -163,6 +206,7 @@
     <div class="tab" data-tab="services">Услуги</div>
     <div class="tab" data-tab="history">История</div>
     <div class="tab" data-tab="stats">Статистика</div>
+    <div class="tab" data-tab="settings">Настройки</div>
   </div>
 
   <div class="content" id="app"></div>
@@ -181,8 +225,14 @@
       services: [],
       days: {},
       currentDate: new Date().toISOString().slice(0, 10),
-      incomePercent: 100
+      incomePercent: 100,
+      workingDays: 20,
+      targetMonthly: 0
     };
+
+    let calExpanded = false;
+    let calViewMonth = new Date().getMonth();
+    let calViewYear = new Date().getFullYear();
 
     function load() {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -192,6 +242,8 @@
           state.services = data.services || [];
           state.days = data.days || {};
           state.incomePercent = data.incomePercent != null ? data.incomePercent : 100;
+          state.workingDays = data.workingDays || 20;
+          state.targetMonthly = data.targetMonthly || 0;
         } catch (e) {}
       }
       if (state.services.length === 0) {
@@ -208,7 +260,9 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         services: state.services,
         days: state.days,
-        incomePercent: state.incomePercent
+        incomePercent: state.incomePercent,
+        workingDays: state.workingDays,
+        targetMonthly: state.targetMonthly
       }));
     }
 
@@ -233,6 +287,31 @@
       return Math.round(amount * state.incomePercent / 100);
     }
 
+    function getCurrentMonthNet() {
+      const now = new Date();
+      const ym = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+      let total = 0;
+      Object.keys(state.days).forEach(date => {
+        if (date.startsWith(ym)) total += calcDayTotal(date);
+      });
+      return calcNet(total);
+    }
+
+    function updateHeader() {
+      const d = new Date(state.currentDate + 'T00:00:00');
+      document.getElementById('today-label').textContent = d.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+
+      const currentNet = getCurrentMonthNet();
+      const remain = Math.max(0, state.targetMonthly - currentNet);
+      const remainEl = document.getElementById('remain-label');
+      if (state.targetMonthly > 0) {
+        remainEl.textContent = `Осталось: ${remain.toLocaleString('ru')} ₽`;
+        remainEl.style.color = remain > 0 ? '#fbbf24' : '#22c55e';
+      } else {
+        remainEl.textContent = '';
+      }
+    }
+
     function render() {
       const tab = document.querySelector('.tab.active').dataset.tab;
       const app = document.getElementById('app');
@@ -242,24 +321,81 @@
       else if (tab === 'services') renderServices(app);
       else if (tab === 'history') renderHistory(app);
       else if (tab === 'stats') renderStats(app);
+      else if (tab === 'settings') renderSettings(app);
 
-      updateTodayLabel();
+      updateHeader();
     }
 
-    function updateTodayLabel() {
-      const d = new Date(state.currentDate + 'T00:00:00');
-      document.getElementById('today-label').textContent = d.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+    function renderCalendar() {
+      const selected = state.currentDate;
+      const today = new Date().toISOString().slice(0,10);
+      const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+
+      let html = `<div class="card">
+        <div class="cal-header">
+          <button type="button" class="cal-nav" id="cal-prev">‹</button>
+          <div class="cal-month">${monthNames[calViewMonth]} ${calViewYear}</div>
+          <button type="button" class="cal-nav" id="cal-next">›</button>
+          <button type="button" class="cal-nav secondary" id="cal-toggle" style="margin-left:8px;">${calExpanded ? 'Свернуть' : 'Развернуть'}</button>
+        </div>`;
+
+      if (!calExpanded) {
+        // Week strip around selected date
+        const sel = new Date(selected + 'T00:00:00');
+        const start = new Date(sel);
+        start.setDate(sel.getDate() - sel.getDay() + 1); // Monday start approx
+        html += '<div class="cal-week">';
+        for (let i = 0; i < 7; i++) {
+          const d = new Date(start);
+          d.setDate(start.getDate() + i);
+          const ds = d.toISOString().slice(0,10);
+          const has = state.days[ds] && Object.keys(state.days[ds]).length > 0;
+          const cls = ['cal-day', ds === selected ? 'selected' : '', has ? 'has-data' : ''].filter(Boolean).join(' ');
+          html += `<div class="${cls}" data-date="${ds}">${d.getDate()}<br><small>${['Вс','Пн','Вт','Ср','Чт','Пт','Сб'][d.getDay()]}</small></div>`;
+        }
+        html += '</div>';
+      } else {
+        // Full month
+        const first = new Date(calViewYear, calViewMonth, 1);
+        const last = new Date(calViewYear, calViewMonth + 1, 0);
+        const startPad = (first.getDay() + 6) % 7; // Monday=0
+        html += '<div class="cal-grid">';
+        ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].forEach(w => html += `<div class="cal-weekday">${w}</div>`);
+        for (let i = 0; i < startPad; i++) html += '<div></div>';
+        for (let day = 1; day <= last.getDate(); day++) {
+          const ds = `${calViewYear}-${String(calViewMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+          const has = state.days[ds] && Object.keys(state.days[ds]).length > 0;
+          const cls = ['cal-day', ds === selected ? 'selected' : '', has ? 'has-data' : ''].filter(Boolean).join(' ');
+          html += `<div class="${cls}" data-date="${ds}">${day}</div>`;
+        }
+        html += '</div>';
+      }
+      html += '</div>';
+      return html;
+    }
+
+    function bindCalendar() {
+      document.querySelectorAll('.cal-day[data-date]').forEach(el => {
+        el.onclick = () => {
+          state.currentDate = el.dataset.date;
+          const d = new Date(state.currentDate);
+          calViewMonth = d.getMonth();
+          calViewYear = d.getFullYear();
+          render();
+        };
+      });
+      const prev = document.getElementById('cal-prev');
+      const next = document.getElementById('cal-next');
+      const toggle = document.getElementById('cal-toggle');
+      if (prev) prev.onclick = () => { calViewMonth--; if (calViewMonth < 0) { calViewMonth = 11; calViewYear--; } render(); };
+      if (next) next.onclick = () => { calViewMonth++; if (calViewMonth > 11) { calViewMonth = 0; calViewYear++; } render(); };
+      if (toggle) toggle.onclick = () => { calExpanded = !calExpanded; render(); };
     }
 
     function renderToday(app) {
       const services = getSortedServices();
       const day = getDayData(state.currentDate);
-      let html = `
-        <div class="card">
-          <label class="small">Дата</label>
-          <input type="date" id="date-picker" value="${state.currentDate}">
-        </div>
-      `;
+      let html = renderCalendar();
 
       if (services.length === 0) {
         html += '<div class="empty">Сначала добавьте услуги во вкладке «Услуги»</div>';
@@ -286,13 +422,7 @@
       }
       app.innerHTML = html;
 
-      const datePicker = document.getElementById('date-picker');
-      if (datePicker) {
-        datePicker.onchange = (e) => {
-          state.currentDate = e.target.value;
-          render();
-        };
-      }
+      bindCalendar();
 
       document.querySelectorAll('.qty-btn').forEach(btn => {
         btn.onclick = () => {
@@ -444,15 +574,7 @@
     function renderStats(app) {
       const dates = Object.keys(state.days);
       if (dates.length === 0) {
-        app.innerHTML = `
-          <div class="card">
-            <label class="small">Процент твоего дохода от общей суммы</label>
-            <input type="number" id="percent-input" value="${state.incomePercent}" min="0" max="100" step="1">
-            <button id="save-percent" style="width:100%;">Сохранить процент</button>
-          </div>
-          <div class="empty">Нет данных для статистики</div>
-        `;
-        bindPercent();
+        app.innerHTML = '<div class="empty">Нет данных для статистики</div>';
         return;
       }
 
@@ -478,12 +600,6 @@
       const months = Object.keys(byMonth).sort().reverse().slice(0, 6);
 
       let html = `
-        <div class="card">
-          <label class="small">Процент твоего дохода от общей суммы</label>
-          <input type="number" id="percent-input" value="${state.incomePercent}" min="0" max="100" step="1">
-          <button id="save-percent" style="width:100%;">Сохранить процент</button>
-        </div>
-
         <div class="grid-2">
           <div class="card stat-card">
             <div class="value">${currentMonthNet.toLocaleString('ru')} ₽</div>
@@ -518,23 +634,53 @@
       });
 
       app.innerHTML = html;
-      bindPercent();
     }
 
-    function bindPercent() {
-      const btn = document.getElementById('save-percent');
-      if (btn) {
-        btn.onclick = () => {
-          const val = +document.getElementById('percent-input').value;
-          if (val >= 0 && val <= 100) {
-            state.incomePercent = val;
-            save();
-            render();
-          } else {
-            alert('Процент от 0 до 100');
-          }
-        };
-      }
+    function renderSettings(app) {
+      const targetDaily = state.workingDays > 0 && state.targetMonthly > 0
+        ? Math.round(state.targetMonthly / state.workingDays)
+        : 0;
+      // For next month target daily (gross needed to achieve net)
+      const targetDailyGross = state.incomePercent > 0 && targetDaily > 0
+        ? Math.round(targetDaily * 100 / state.incomePercent)
+        : 0;
+
+      app.innerHTML = `
+        <div class="card">
+          <label class="small">Процент твоего дохода от общей суммы</label>
+          <input type="number" id="percent-input" value="${state.incomePercent}" min="1" max="100" step="1">
+        </div>
+        <div class="card">
+          <label class="small">Количество рабочих дней в месяце</label>
+          <input type="number" id="days-input" value="${state.workingDays}" min="1" max="31">
+        </div>
+        <div class="card">
+          <label class="small">Необходимый доход в месяц (твой, с учётом %)</label>
+          <input type="number" id="target-input" value="${state.targetMonthly}" min="0" step="1000">
+        </div>
+        <div class="card stat-card">
+          <div class="value">${targetDaily.toLocaleString('ru')} ₽</div>
+          <div class="label">Целевой доход в день (твой) на следующий месяц</div>
+          ${targetDailyGross > 0 ? `<div class="small" style="margin-top:6px;">Нужно зарабатывать ~${targetDailyGross.toLocaleString('ru')} ₽ общей суммы в день</div>` : ''}
+        </div>
+        <button id="save-settings" style="width:100%;">Сохранить настройки</button>
+      `;
+
+      document.getElementById('save-settings').onclick = () => {
+        const p = +document.getElementById('percent-input').value;
+        const d = +document.getElementById('days-input').value;
+        const t = +document.getElementById('target-input').value;
+        if (p >= 1 && p <= 100 && d >= 1 && d <= 31 && t >= 0) {
+          state.incomePercent = p;
+          state.workingDays = d;
+          state.targetMonthly = t;
+          save();
+          alert('Настройки сохранены');
+          render();
+        } else {
+          alert('Проверь значения');
+        }
+      };
     }
 
     document.querySelectorAll('.tab').forEach(tab => {
