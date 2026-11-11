@@ -155,7 +155,6 @@
     .stat-card .label { color: var(--muted); font-size: 0.85rem; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .small { font-size: 0.8rem; color: var(--muted); }
-    /* Calendar */
     .cal-header {
       display: flex;
       justify-content: space-between;
@@ -328,7 +327,6 @@
 
     function renderCalendar() {
       const selected = state.currentDate;
-      const today = new Date().toISOString().slice(0,10);
       const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
 
       let html = `<div class="card">
@@ -340,10 +338,9 @@
         </div>`;
 
       if (!calExpanded) {
-        // Week strip around selected date
         const sel = new Date(selected + 'T00:00:00');
         const start = new Date(sel);
-        start.setDate(sel.getDate() - sel.getDay() + 1); // Monday start approx
+        start.setDate(sel.getDate() - sel.getDay() + 1);
         html += '<div class="cal-week">';
         for (let i = 0; i < 7; i++) {
           const d = new Date(start);
@@ -355,10 +352,9 @@
         }
         html += '</div>';
       } else {
-        // Full month
         const first = new Date(calViewYear, calViewMonth, 1);
         const last = new Date(calViewYear, calViewMonth + 1, 0);
-        const startPad = (first.getDay() + 6) % 7; // Monday=0
+        const startPad = (first.getDay() + 6) % 7;
         html += '<div class="cal-grid">';
         ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].forEach(w => html += `<div class="cal-weekday">${w}</div>`);
         for (let i = 0; i < startPad; i++) html += '<div></div>';
@@ -392,6 +388,33 @@
       if (toggle) toggle.onclick = () => { calExpanded = !calExpanded; render(); };
     }
 
+    function autoSaveDay() {
+      const quantities = {};
+      document.querySelectorAll('.qty-input').forEach(input => {
+        const id = +input.dataset.id;
+        const qty = +input.value || 0;
+        if (qty > 0) quantities[id] = qty;
+      });
+
+      const prev = state.days[state.currentDate] || {};
+      Object.entries(quantities).forEach(([id, qty]) => {
+        if (qty > 0 && !(prev[id] > 0)) {
+          const service = state.services.find(s => s.id == id);
+          if (service) service.usage = (service.usage || 0) + 1;
+        }
+      });
+      Object.keys(prev).forEach(id => {
+        if (prev[id] > 0 && !(quantities[id] > 0)) {
+          const service = state.services.find(s => s.id == id);
+          if (service && service.usage > 0) service.usage--;
+        }
+      });
+
+      state.days[state.currentDate] = quantities;
+      save();
+      updateHeader();
+    }
+
     function renderToday(app) {
       const services = getSortedServices();
       const day = getDayData(state.currentDate);
@@ -418,7 +441,6 @@
           `;
         });
         html += '</div>';
-        html += `<button id="save-day" style="width:100%; margin-top:8px;">Сохранить день</button>`;
       }
       app.innerHTML = html;
 
@@ -434,16 +456,17 @@
             v = Math.max(0, v + delta);
             input.value = v;
             updateDayTotalDisplay();
+            autoSaveDay();
           }
         };
       });
 
       document.querySelectorAll('.qty-input').forEach(input => {
-        input.oninput = updateDayTotalDisplay;
+        input.oninput = () => {
+          updateDayTotalDisplay();
+          autoSaveDay();
+        };
       });
-
-      const saveBtn = document.getElementById('save-day');
-      if (saveBtn) saveBtn.onclick = saveDay;
 
       updateDayTotalDisplay();
     }
@@ -464,34 +487,6 @@
         if (service) total += qty * service.price;
       });
       return total;
-    }
-
-    function saveDay() {
-      const quantities = {};
-      document.querySelectorAll('.qty-input').forEach(input => {
-        const id = +input.dataset.id;
-        const qty = +input.value || 0;
-        if (qty > 0) quantities[id] = qty;
-      });
-
-      const prev = state.days[state.currentDate] || {};
-      Object.entries(quantities).forEach(([id, qty]) => {
-        if (qty > 0 && !(prev[id] > 0)) {
-          const service = state.services.find(s => s.id == id);
-          if (service) service.usage = (service.usage || 0) + 1;
-        }
-      });
-      Object.keys(prev).forEach(id => {
-        if (prev[id] > 0 && !(quantities[id] > 0)) {
-          const service = state.services.find(s => s.id == id);
-          if (service && service.usage > 0) service.usage--;
-        }
-      });
-
-      state.days[state.currentDate] = quantities;
-      save();
-      alert('День сохранён!');
-      render();
     }
 
     function renderServices(app) {
@@ -640,7 +635,6 @@
       const targetDaily = state.workingDays > 0 && state.targetMonthly > 0
         ? Math.round(state.targetMonthly / state.workingDays)
         : 0;
-      // For next month target daily (gross needed to achieve net)
       const targetDailyGross = state.incomePercent > 0 && targetDaily > 0
         ? Math.round(targetDaily * 100 / state.incomePercent)
         : 0;
@@ -663,23 +657,95 @@
           <div class="label">Целевой доход в день (твой) на следующий месяц</div>
           ${targetDailyGross > 0 ? `<div class="small" style="margin-top:6px;">Нужно зарабатывать ~${targetDailyGross.toLocaleString('ru')} ₽ общей суммы в день</div>` : ''}
         </div>
-        <button id="save-settings" style="width:100%;">Сохранить настройки</button>
+
+        <div class="card">
+          <h3 style="margin-bottom:10px;">Резервная копия</h3>
+          <button id="export-btn" style="width:100%; margin-bottom:8px;">Экспорт в JSON</button>
+          <label class="small">Импорт из JSON (заменит текущие данные)</label>
+          <input type="file" id="import-file" accept=".json" style="padding:8px; background:#334155;">
+          <button id="import-btn" style="width:100%; margin-top:8px;" class="secondary">Импортировать</button>
+        </div>
       `;
 
-      document.getElementById('save-settings').onclick = () => {
-        const p = +document.getElementById('percent-input').value;
-        const d = +document.getElementById('days-input').value;
-        const t = +document.getElementById('target-input').value;
-        if (p >= 1 && p <= 100 && d >= 1 && d <= 31 && t >= 0) {
-          state.incomePercent = p;
-          state.workingDays = d;
-          state.targetMonthly = t;
-          save();
-          alert('Настройки сохранены');
-          render();
-        } else {
-          alert('Проверь значения');
+      // Auto-save settings on input change
+      ['percent-input','days-input','target-input'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.oninput = () => {
+            const p = +document.getElementById('percent-input').value;
+            const d = +document.getElementById('days-input').value;
+            const t = +document.getElementById('target-input').value;
+            if (p >= 1 && p <= 100) state.incomePercent = p;
+            if (d >= 1 && d <= 31) state.workingDays = d;
+            if (t >= 0) state.targetMonthly = t;
+            save();
+            updateHeader();
+            // Re-render target daily display without full reload
+            const targetDaily = state.workingDays > 0 && state.targetMonthly > 0
+              ? Math.round(state.targetMonthly / state.workingDays)
+              : 0;
+            const targetDailyGross = state.incomePercent > 0 && targetDaily > 0
+              ? Math.round(targetDaily * 100 / state.incomePercent)
+              : 0;
+            const card = document.querySelector('.stat-card');
+            if (card) {
+              card.innerHTML = `
+                <div class="value">${targetDaily.toLocaleString('ru')} ₽</div>
+                <div class="label">Целевой доход в день (твой) на следующий месяц</div>
+                ${targetDailyGross > 0 ? `<div class="small" style="margin-top:6px;">Нужно зарабатывать ~${targetDailyGross.toLocaleString('ru')} ₽ общей суммы в день</div>` : ''}
+              `;
+            }
+          };
         }
+      });
+
+      document.getElementById('export-btn').onclick = () => {
+        const data = {
+          services: state.services,
+          days: state.days,
+          incomePercent: state.incomePercent,
+          workingDays: state.workingDays,
+          targetMonthly: state.targetMonthly,
+          exportedAt: new Date().toISOString()
+        };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `dohod-vracha-${new Date().toISOString().slice(0,10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      document.getElementById('import-btn').onclick = () => {
+        const file = document.getElementById('import-file').files[0];
+        if (!file) {
+          alert('Выбери файл JSON');
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const data = JSON.parse(e.target.result);
+            if (data.services && Array.isArray(data.services)) {
+              if (confirm('Импорт заменит все текущие данные. Продолжить?')) {
+                state.services = data.services;
+                state.days = data.days || {};
+                state.incomePercent = data.incomePercent != null ? data.incomePercent : 100;
+                state.workingDays = data.workingDays || 20;
+                state.targetMonthly = data.targetMonthly || 0;
+                save();
+                alert('Данные импортированы');
+                render();
+              }
+            } else {
+              alert('Неверный формат файла');
+            }
+          } catch (err) {
+            alert('Ошибка чтения JSON');
+          }
+        };
+        reader.readAsText(file);
       };
     }
 
