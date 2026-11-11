@@ -26,7 +26,7 @@
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
-      padding-bottom: 70px;
+      padding-bottom: 80px;
     }
     header {
       background: linear-gradient(135deg, #0d9488, #0f766e);
@@ -96,13 +96,28 @@
       background: #334155;
       border-radius: 10px;
     }
-    .service-info { flex: 1; }
+    .service-info { flex: 1; min-width: 0; }
     .service-name { font-weight: 600; }
     .service-price { color: var(--muted); font-size: 0.85rem; }
+    .qty-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .qty-btn {
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      font-size: 1.2rem;
+      line-height: 1;
+      border-radius: 8px;
+      background: #475569;
+    }
     .qty-input {
-      width: 70px !important;
+      width: 60px !important;
       text-align: center;
       margin: 0 !important;
+      padding: 8px 4px !important;
     }
     .total-box {
       position: fixed;
@@ -110,15 +125,16 @@
       left: 0;
       right: 0;
       background: #1e293b;
-      padding: 12px 16px;
+      padding: 10px 16px;
       border-top: 1px solid #334155;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      font-size: 1.1rem;
+      font-size: 1rem;
       font-weight: 700;
     }
     .total-box .amount { color: var(--success); }
+    .total-box .net { color: var(--accent-light); font-size: 0.9rem; }
     .empty { text-align: center; color: var(--muted); padding: 40px 20px; }
     .history-item {
       display: flex;
@@ -130,7 +146,7 @@
       text-align: center;
       padding: 16px;
     }
-    .stat-card .value { font-size: 1.6rem; font-weight: 700; color: var(--accent-light); }
+    .stat-card .value { font-size: 1.5rem; font-weight: 700; color: var(--accent-light); }
     .stat-card .label { color: var(--muted); font-size: 0.85rem; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .small { font-size: 0.8rem; color: var(--muted); }
@@ -152,8 +168,10 @@
   <div class="content" id="app"></div>
 
   <div class="total-box" id="total-box" style="display:none;">
-    <span>Итого за день:</span>
-    <span class="amount" id="day-total">0 ₽</span>
+    <div>
+      <div>Итого: <span class="amount" id="day-total">0 ₽</span></div>
+      <div class="net" id="day-net">Твой доход: 0 ₽</div>
+    </div>
   </div>
 
   <script>
@@ -162,7 +180,8 @@
     let state = {
       services: [],
       days: {},
-      currentDate: new Date().toISOString().slice(0, 10)
+      currentDate: new Date().toISOString().slice(0, 10),
+      incomePercent: 100
     };
 
     function load() {
@@ -172,6 +191,7 @@
           const data = JSON.parse(raw);
           state.services = data.services || [];
           state.days = data.days || {};
+          state.incomePercent = data.incomePercent != null ? data.incomePercent : 100;
         } catch (e) {}
       }
       if (state.services.length === 0) {
@@ -187,7 +207,8 @@
     function save() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         services: state.services,
-        days: state.days
+        days: state.days,
+        incomePercent: state.incomePercent
       }));
     }
 
@@ -206,6 +227,10 @@
     function calcDayTotal(date) {
       const day = getDayData(date);
       return state.services.reduce((sum, s) => sum + (day[s.id] || 0) * s.price, 0);
+    }
+
+    function calcNet(amount) {
+      return Math.round(amount * state.incomePercent / 100);
     }
 
     function render() {
@@ -248,7 +273,11 @@
                 <div class="service-name">${s.name}</div>
                 <div class="service-price">${s.price.toLocaleString('ru')} ₽ · использовано ${s.usage || 0} раз</div>
               </div>
-              <input type="number" class="qty-input" data-id="${s.id}" value="${qty}" min="0" inputmode="numeric">
+              <div class="qty-controls">
+                <button type="button" class="qty-btn" data-id="${s.id}" data-delta="-1">−</button>
+                <input type="number" class="qty-input" data-id="${s.id}" value="${qty}" min="0" inputmode="numeric">
+                <button type="button" class="qty-btn" data-id="${s.id}" data-delta="1">+</button>
+              </div>
             </div>
           `;
         });
@@ -265,6 +294,20 @@
         };
       }
 
+      document.querySelectorAll('.qty-btn').forEach(btn => {
+        btn.onclick = () => {
+          const id = btn.dataset.id;
+          const delta = +btn.dataset.delta;
+          const input = document.querySelector(`.qty-input[data-id="${id}"]`);
+          if (input) {
+            let v = +input.value || 0;
+            v = Math.max(0, v + delta);
+            input.value = v;
+            updateDayTotalDisplay();
+          }
+        };
+      });
+
       document.querySelectorAll('.qty-input').forEach(input => {
         input.oninput = updateDayTotalDisplay;
       });
@@ -277,7 +320,9 @@
 
     function updateDayTotalDisplay() {
       const total = calcCurrentDayTotal();
+      const net = calcNet(total);
       document.getElementById('day-total').textContent = total.toLocaleString('ru') + ' ₽';
+      document.getElementById('day-net').textContent = `Твой доход (${state.incomePercent}%): ${net.toLocaleString('ru')} ₽`;
     }
 
     function calcCurrentDayTotal() {
@@ -315,7 +360,7 @@
 
       state.days[state.currentDate] = quantities;
       save();
-      alert('День сохранён! Пук в вечность учёта 💨');
+      alert('День сохранён!');
       render();
     }
 
@@ -348,7 +393,7 @@
         const name = document.getElementById('new-name').value.trim();
         const price = +document.getElementById('new-price').value;
         if (!name || price <= 0) {
-          alert('Название и цена обязательны, не метай бисер перед свиньями');
+          alert('Название и цена обязательны');
           return;
         }
         state.services.push({ id: nextId(), name, price, usage: 0 });
@@ -371,12 +416,13 @@
     function renderHistory(app) {
       const dates = Object.keys(state.days).sort().reverse();
       if (dates.length === 0) {
-        app.innerHTML = '<div class="empty">Пока пусто, как космос без пуков</div>';
+        app.innerHTML = '<div class="empty">Пока пусто</div>';
         return;
       }
       let html = '';
       dates.forEach(date => {
         const total = calcDayTotal(date);
+        const net = calcNet(total);
         const d = new Date(date + 'T00:00:00');
         const label = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' });
         html += `
@@ -385,7 +431,10 @@
               <div>${label}</div>
               <div class="small">${Object.keys(state.days[date]).length} услуг</div>
             </div>
-            <div style="font-weight:700; color:var(--success);">${total.toLocaleString('ru')} ₽</div>
+            <div style="text-align:right;">
+              <div style="font-weight:700; color:var(--success);">${total.toLocaleString('ru')} ₽</div>
+              <div class="small">твой: ${net.toLocaleString('ru')} ₽</div>
+            </div>
           </div>
         `;
       });
@@ -395,13 +444,22 @@
     function renderStats(app) {
       const dates = Object.keys(state.days);
       if (dates.length === 0) {
-        app.innerHTML = '<div class="empty">Нет данных для статистики — ловить рыбу в унитазе рано</div>';
+        app.innerHTML = `
+          <div class="card">
+            <label class="small">Процент твоего дохода от общей суммы</label>
+            <input type="number" id="percent-input" value="${state.incomePercent}" min="0" max="100" step="1">
+            <button id="save-percent" style="width:100%;">Сохранить процент</button>
+          </div>
+          <div class="empty">Нет данных для статистики</div>
+        `;
+        bindPercent();
         return;
       }
 
       let totalAll = 0;
       let maxDay = 0;
       const byMonth = {};
+      const currentMonth = new Date().toISOString().slice(0, 7);
 
       dates.forEach(date => {
         const t = calcDayTotal(date);
@@ -412,41 +470,71 @@
       });
 
       const avg = Math.round(totalAll / dates.length);
+      const netAll = calcNet(totalAll);
+      const netAvg = calcNet(avg);
+      const currentMonthTotal = byMonth[currentMonth] || 0;
+      const currentMonthNet = calcNet(currentMonthTotal);
+
       const months = Object.keys(byMonth).sort().reverse().slice(0, 6);
 
       let html = `
+        <div class="card">
+          <label class="small">Процент твоего дохода от общей суммы</label>
+          <input type="number" id="percent-input" value="${state.incomePercent}" min="0" max="100" step="1">
+          <button id="save-percent" style="width:100%;">Сохранить процент</button>
+        </div>
+
         <div class="grid-2">
           <div class="card stat-card">
-            <div class="value">${totalAll.toLocaleString('ru')} ₽</div>
-            <div class="label">Всего за всё время</div>
+            <div class="value">${currentMonthNet.toLocaleString('ru')} ₽</div>
+            <div class="label">Твой доход за этот месяц</div>
           </div>
           <div class="card stat-card">
-            <div class="value">${avg.toLocaleString('ru')} ₽</div>
-            <div class="label">Средний день</div>
+            <div class="value">${netAvg.toLocaleString('ru')} ₽</div>
+            <div class="label">Среднее в день (твоё)</div>
           </div>
           <div class="card stat-card">
-            <div class="value">${maxDay.toLocaleString('ru')} ₽</div>
-            <div class="label">Лучший день</div>
+            <div class="value">${netAll.toLocaleString('ru')} ₽</div>
+            <div class="label">Всего твой доход</div>
           </div>
           <div class="card stat-card">
             <div class="value">${dates.length}</div>
             <div class="label">Дней в учёте</div>
           </div>
         </div>
-        <h3 style="margin:16px 0 8px;">По месяцам</h3>
+
+        <h3 style="margin:16px 0 8px;">По месяцам (твой доход)</h3>
       `;
 
       months.forEach(m => {
         const label = new Date(m + '-01').toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+        const net = calcNet(byMonth[m]);
         html += `
           <div class="history-item">
             <div>${label}</div>
-            <div style="font-weight:700;">${byMonth[m].toLocaleString('ru')} ₽</div>
+            <div style="font-weight:700;">${net.toLocaleString('ru')} ₽</div>
           </div>
         `;
       });
 
       app.innerHTML = html;
+      bindPercent();
+    }
+
+    function bindPercent() {
+      const btn = document.getElementById('save-percent');
+      if (btn) {
+        btn.onclick = () => {
+          const val = +document.getElementById('percent-input').value;
+          if (val >= 0 && val <= 100) {
+            state.incomePercent = val;
+            save();
+            render();
+          } else {
+            alert('Процент от 0 до 100');
+          }
+        };
+      }
     }
 
     document.querySelectorAll('.tab').forEach(tab => {
