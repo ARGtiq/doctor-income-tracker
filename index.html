@@ -53,6 +53,7 @@
     header h1 { font-size: 1.4rem; font-weight: 700; }
     .header-info { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 4px; }
     .header-remain { font-size: 0.85rem; opacity: 0.95; text-align: right; }
+    .tip { font-size: 0.75rem; opacity: 0.9; margin-top: 6px; line-height: 1.3; }
     .progress-wrap { margin-top: 10px; height: 6px; background: rgba(255,255,255,.25); border-radius: 3px; overflow: hidden; }
     .progress-bar { height: 100%; background: #22c55e; border-radius: 3px; transition: width .3s; }
     .tabs {
@@ -60,7 +61,7 @@
       background: var(--card);
       border-bottom: 1px solid var(--border);
       position: sticky;
-      top: 88px;
+      top: 108px;
       z-index: 9;
       overflow-x: auto;
     }
@@ -214,6 +215,8 @@
     .quick-nav { display: flex; gap: 8px; margin-bottom: 12px; }
     .chart-bar { height: 8px; background: var(--border); border-radius: 4px; margin: 4px 0; overflow: hidden; }
     .chart-fill { height: 100%; background: var(--accent); border-radius: 4px; }
+    .row-2 { display: flex; gap: 8px; }
+    .row-2 > div { flex: 1; }
   </style>
 </head>
 <body>
@@ -223,6 +226,7 @@
       <div class="small" id="today-label"></div>
       <div class="header-remain" id="remain-label"></div>
     </div>
+    <div class="tip" id="tip-label"></div>
     <div class="progress-wrap"><div class="progress-bar" id="month-progress" style="width:0%"></div></div>
   </header>
 
@@ -244,6 +248,17 @@
   <script>
     const STORAGE_KEY = 'dohod_vracha_v2';
 
+    const DEFAULT_TIPS = [
+      'Слушайте пациента до конца — это повышает доверие и чек за повторные визиты.',
+      'Объясняйте план лечения простым языком — пациенты чаще соглашаются на дополнительные услуги.',
+      'Спрашивайте о ожиданиях пациента — это помогает предложить подходящий объём помощи.',
+      'Подчёркивайте ценность повторного визита — люди ценят такое внимание.',
+      'Предлагайте комплексные решения, а не только отдельные услуги.',
+      'Будьте на связи после визита — короткое сообщение повышает лояльность.',
+      'Объясняйте, почему именно эта услуга важна для пациента.',
+      'Создавайте атмосферу безопасности — пациенты готовы платить за комфорт и внимание.'
+    ];
+
     let state = {
       services: [],
       days: {},
@@ -253,13 +268,17 @@
       workingDaysMarked: {},
       notes: {},
       theme: 'system',
-      color: 'teal'
+      color: 'teal',
+      tipsEnabled: true,
+      tips: DEFAULT_TIPS.slice(),
+      monthSettings: {}
     };
 
     let calExpanded = false;
     let calViewMonth = new Date().getMonth();
     let calViewYear = new Date().getFullYear();
     let markMode = false;
+    let tipIndex = 0;
 
     function load() {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -270,6 +289,9 @@
           if (!state.notes) state.notes = {};
           if (!state.theme) state.theme = 'system';
           if (!state.color) state.color = 'teal';
+          if (!state.tips) state.tips = DEFAULT_TIPS.slice();
+          if (state.tipsEnabled === undefined) state.tipsEnabled = true;
+          if (!state.monthSettings) state.monthSettings = {};
         } catch (e) {}
       }
       if (state.services.length === 0) {
@@ -297,6 +319,27 @@
       root.setAttribute('data-color', state.color || 'teal');
     }
 
+    function getYm() {
+      return `${calViewYear}-${String(calViewMonth+1).padStart(2,'0')}`;
+    }
+
+    function getMonthSetting(ym, key, fallback) {
+      return (state.monthSettings[ym] && state.monthSettings[ym][key] != null) ? state.monthSettings[ym][key] : fallback;
+    }
+
+    function setMonthSetting(ym, key, value) {
+      if (!state.monthSettings[ym]) state.monthSettings[ym] = {};
+      state.monthSettings[ym][key] = value;
+    }
+
+    function getCurrentTarget() {
+      return getMonthSetting(getYm(), 'target', state.targetMonthly);
+    }
+
+    function getCurrentPercent() {
+      return getMonthSetting(getYm(), 'percent', state.incomePercent);
+    }
+
     function nextId() {
       return state.services.reduce((m, s) => Math.max(m, s.id), 0) + 1;
     }
@@ -315,7 +358,7 @@
     }
 
     function calcNet(amount) {
-      return Math.round(amount * state.incomePercent / 100);
+      return Math.round(amount * getCurrentPercent() / 100);
     }
 
     function getMonthGross(ym) {
@@ -340,7 +383,7 @@
       const today = new Date().toISOString().slice(0,10);
       const ym = today.slice(0,7);
       const monthNet = getMonthNet(ym);
-      const remain = Math.max(0, state.targetMonthly - monthNet);
+      const remain = Math.max(0, getCurrentTarget() - monthNet);
       const leftDays = getRemainingWorkingDays();
       return leftDays > 0 ? Math.round(remain / leftDays) : 0;
     }
@@ -351,17 +394,27 @@
 
       const ym = new Date().toISOString().slice(0,7);
       const currentNet = getMonthNet(ym);
-      const remain = Math.max(0, state.targetMonthly - currentNet);
+      const target = getCurrentTarget();
+      const remain = Math.max(0, target - currentNet);
       const remainEl = document.getElementById('remain-label');
       const progress = document.getElementById('month-progress');
-      if (state.targetMonthly > 0) {
-        const pct = Math.min(100, Math.round(currentNet / state.targetMonthly * 100));
+      const tipEl = document.getElementById('tip-label');
+
+      if (target > 0) {
+        const pct = Math.min(100, Math.round(currentNet / target * 100));
         remainEl.textContent = `Осталось: ${remain.toLocaleString('ru')} ₽`;
         remainEl.style.color = remain > 0 ? '#fbbf24' : '#22c55e';
         progress.style.width = pct + '%';
       } else {
         remainEl.textContent = '';
         progress.style.width = '0%';
+      }
+
+      if (state.tipsEnabled && state.tips && state.tips.length) {
+        tipEl.textContent = '💡 ' + state.tips[tipIndex % state.tips.length];
+        tipEl.style.display = 'block';
+      } else {
+        tipEl.style.display = 'none';
       }
     }
 
@@ -380,6 +433,9 @@
     function renderCalendar() {
       const selected = state.currentDate;
       const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+      const ym = getYm();
+      const target = getCurrentTarget();
+      const percent = getCurrentPercent();
 
       let html = `<div class="card">
         <div class="cal-header">
@@ -390,12 +446,20 @@
         </div>`;
 
       if (calExpanded) {
-        const marked = Object.keys(state.workingDaysMarked).filter(d => d.startsWith(`${calViewYear}-${String(calViewMonth+1).padStart(2,'0')}`) && state.workingDaysMarked[d]).length;
+        const marked = Object.keys(state.workingDaysMarked).filter(d => d.startsWith(ym) && state.workingDaysMarked[d]).length;
         const left = getRemainingWorkingDays();
         html += `
           <div style="margin:10px 0;">
-            <label class="small">Необходимый мой доход за месяц</label>
-            <input type="number" id="target-input" value="${state.targetMonthly}" min="0" step="1000">
+            <div class="row-2">
+              <div>
+                <label class="small">Необходимый мой доход за месяц</label>
+                <input type="number" id="target-input" value="${target}" min="0" step="1000">
+              </div>
+              <div>
+                <label class="small">Процент дохода</label>
+                <input type="number" id="percent-input" value="${percent}" min="1" max="100" step="1">
+              </div>
+            </div>
             <div class="small">Отмечено рабочих: <strong>${marked}</strong> · осталось рабочих: <strong>${left}</strong></div>
             <button type="button" id="mark-mode-btn" class="${markMode ? '' : 'secondary'}" style="margin-top:8px; width:100%;">
               ${markMode ? 'Режим отметки включён' : 'Отметить рабочие дни'}
@@ -468,7 +532,21 @@
       const targetInput = document.getElementById('target-input');
       if (targetInput) {
         targetInput.oninput = () => {
+          const ym = getYm();
+          setMonthSetting(ym, 'target', +targetInput.value || 0);
           state.targetMonthly = +targetInput.value || 0;
+          save();
+          updateHeader();
+          updateDayTotalDisplay();
+        };
+      }
+      const percentInput = document.getElementById('percent-input');
+      if (percentInput) {
+        percentInput.oninput = () => {
+          const ym = getYm();
+          const v = +percentInput.value || 100;
+          setMonthSetting(ym, 'percent', v);
+          state.incomePercent = v;
           save();
           updateHeader();
           updateDayTotalDisplay();
@@ -603,7 +681,7 @@
         const p = Math.round(net / dailyTarget * 100);
         pct = ` (${p}% от цели дня)`;
       }
-      document.getElementById('day-net').textContent = `Твой доход (${state.incomePercent}%): ${net.toLocaleString('ru')} ₽${pct}`;
+      document.getElementById('day-net').textContent = `Твой доход (${getCurrentPercent()}%): ${net.toLocaleString('ru')} ₽${pct}`;
     }
 
     function calcCurrentDayTotal() {
@@ -785,8 +863,10 @@
         </div>
 
         <div class="card">
-          <label class="small">Процент твоего дохода от общей суммы</label>
-          <input type="number" id="percent-input" value="${state.incomePercent}" min="1" max="100" step="1">
+          <label class="small"><input type="checkbox" id="tips-enabled" ${state.tipsEnabled ? 'checked' : ''}> Показывать советы в шапке</label>
+          <label class="small" style="margin-top:12px;">Список советов (по одному на строку)</label>
+          <textarea id="tips-list" rows="8" style="font-size:0.85rem;">${(state.tips || []).join('\n')}</textarea>
+          <button id="save-tips" style="width:100%;">Сохранить советы</button>
         </div>
 
         <div class="card">
@@ -832,12 +912,19 @@
         save();
       };
 
-      document.getElementById('percent-input').oninput = (e) => {
-        const v = +e.target.value;
-        if (v >= 1 && v <= 100) {
-          state.incomePercent = v;
-          save();
-        }
+      document.getElementById('tips-enabled').onchange = (e) => {
+        state.tipsEnabled = e.target.checked;
+        save();
+        updateHeader();
+      };
+
+      document.getElementById('save-tips').onclick = () => {
+        const text = document.getElementById('tips-list').value;
+        state.tips = text.split('\n').map(s => s.trim()).filter(Boolean);
+        if (state.tips.length === 0) state.tips = DEFAULT_TIPS.slice();
+        save();
+        alert('Советы сохранены');
+        updateHeader();
       };
 
       document.querySelectorAll('.edit-name, .edit-price').forEach(input => {
@@ -896,6 +983,8 @@
               if (confirm('Импорт заменит все данные. Продолжить?')) {
                 Object.assign(state, data);
                 if (!state.notes) state.notes = {};
+                if (!state.tips) state.tips = DEFAULT_TIPS.slice();
+                if (!state.monthSettings) state.monthSettings = {};
                 applyTheme();
                 save();
                 alert('Готово');
@@ -919,6 +1008,13 @@
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
       if (state.theme === 'system') applyTheme();
     });
+
+    setInterval(() => {
+      if (state.tipsEnabled && state.tips && state.tips.length > 1) {
+        tipIndex = (tipIndex + 1) % state.tips.length;
+        updateHeader();
+      }
+    }, 15000);
 
     load();
     render();
